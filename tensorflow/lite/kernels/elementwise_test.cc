@@ -45,6 +45,27 @@ class ElementWiseOpFloatModel : public ElementWiseOpBaseModel {
   }
 };
 
+class ElementWiseOpInt8Model : public ElementWiseOpBaseModel {
+ public:
+  ElementWiseOpInt8Model(const TensorData& input, BuiltinOperator op) {
+    input_ = AddInput(input);
+    output_ = AddOutput(input);
+    SetBuiltinOp(op, BuiltinOptions_NONE, 0);
+    BuildInterpreter({GetShape(input_)});
+  }
+
+  void SetInput(std::initializer_list<int8_t> data) {
+    PopulateTensor(input_, data);
+  }
+
+  std::vector<int8_t> GetOutput() { return ExtractVector<int8_t>(output_); }
+
+  std::vector<float> GetDequantizedOutput() {
+    return Dequantize<int8_t>(ExtractVector<int8_t>(output_), GetScale(output_),
+                              GetZeroPoint(output_));
+  }
+};
+
 class ElementWiseOpBoolModel : public ElementWiseOpBaseModel {
  public:
   ElementWiseOpBoolModel(BuiltinOperator op,
@@ -130,6 +151,51 @@ TEST(ElementWise, LogicalNot) {
   EXPECT_THAT(m.ExtractVector<bool>(m.output()),
               ElementsAreArray({false, true, false, true}));
   EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
+}
+
+TEST(Int8ActivationsOpTest, Abs1) {
+  // Calculate quantized abs
+  TensorData td;
+  td.type = TensorType_INT8;
+  td.shape = {1, 1, 4, 1};
+  td.scale = 0.01;
+  td.zero_point = 0;
+  ElementWiseOpInt8Model m(td, BuiltinOperator_ABS);
+  m.SetInput({-127, 0, -0, 127});
+  m.Invoke();
+
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({127, 0, 0, 127}));
+  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray(td.shape));
+}
+
+TEST(Int8ActivationsOpTest, Abs2) {
+  // Calculate quantized abs
+  TensorData td;
+  td.type = TensorType_INT8;
+  td.shape = {1, 1, 4, 1};
+  td.scale = 0.01;
+  td.zero_point = 0;
+  ElementWiseOpInt8Model m(td, BuiltinOperator_ABS);
+  m.SetInput({-128, 0, -0, 127});
+  m.Invoke();
+
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({127, 0, 0, 127}));
+  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray(td.shape));
+}
+
+TEST(Int8ActivationsOpTest, Abs3) {
+  // Calculate quantized abs
+  TensorData td;
+  td.type = TensorType_INT8;
+  td.shape = {1, 1, 4, 1};
+  td.scale = 0.01;
+  td.zero_point = -10;
+  ElementWiseOpInt8Model m(td, BuiltinOperator_ABS);
+  m.SetInput({-128, 0, -0, 12});
+  m.Invoke();
+
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({108, 0, 0, 12}));
+  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray(td.shape));
 }
 
 }  // namespace

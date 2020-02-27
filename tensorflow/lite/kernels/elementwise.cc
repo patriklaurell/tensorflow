@@ -76,8 +76,52 @@ inline TfLiteStatus EvalLogical(TfLiteContext* context, TfLiteNode* node,
   return EvalImpl<bool>(context, node, bool_func, kTfLiteBool);
 }
 
+template <typename T>
+TfLiteStatus AbsEvalQuantized(TfLiteContext* context, TfLiteNode* node) {
+  const TfLiteTensor* input = GetInput(context, node, 0);
+  TfLiteTensor* output = GetOutput(context, node, 0);
+
+  // Support only case where input and output have same quantization
+  // scale and zero_point for output is smaller than input. This ensures
+  // that output does not overflow limits of quantization.
+  TF_LITE_ENSURE(context, input->params.scale == output->params.scale);
+
+  const int num_elements =
+      MatchingElementsSize(GetTensorShape(input), GetTensorShape(output));
+  const T* in_data = tflite::GetTensorData<T>(input);
+  T* out_data = tflite::GetTensorData<T>(output);
+  int in_zp = static_cast<T>(input->params.zero_point);
+  int out_zp = static_cast<T>(output->params.zero_point);
+  for (int i = 0; i < num_elements; i++) {
+    int val = in_data[i] - in_zp;
+    if (val < 0) {
+      val = out_zp - val;
+    } else {
+      val = out_zp + val;
+    }
+    T clamped_val = static_cast<T>(
+        std::min(std::max(val, static_cast<int>(std::numeric_limits<T>::min())),
+                 static_cast<int>(std::numeric_limits<T>::max())));
+    out_data[i] = clamped_val;
+  }
+  return kTfLiteOk;
+}
+
 TfLiteStatus AbsEval(TfLiteContext* context, TfLiteNode* node) {
-  return EvalNumeric(context, node, std::abs);
+  const TfLiteTensor* input = GetInput(context, node, 0);
+  switch (input->type) {
+    case kTfLiteFloat32: {
+      return EvalNumeric(context, node, std::abs);
+    } break;
+    case kTfLiteInt8: {
+      return AbsEvalQuantized<int8_t>(context, node);
+    } break;
+    default: {
+      printf("Only float32 and int8 types are supported.");
+      return kTfLiteError;
+    }
+  }
+  return kTfLiteOk;
 }
 
 TfLiteStatus SinEval(TfLiteContext* context, TfLiteNode* node) {
